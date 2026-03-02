@@ -297,9 +297,7 @@ app.post("/api/chat", async (req, res) => {
         body: JSON.stringify({
           system_instruction: systemMsg ? { parts: [{ text: systemMsg }] } : undefined,
           contents,
-          generationConfig: {
-            maxOutputTokens: req.body.max_tokens || 1000,
-          },
+          generationConfig: {},
         }),
       }
     );

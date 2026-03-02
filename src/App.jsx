@@ -756,8 +756,6 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model: "gemini-2.0-flash",
-          max_tokens: 1000,
           messages: [
             { role: "system", content: `You are a YouTube Analytics AI Assistant. You have full access to the channel's analytics data provided below. Answer questions about the data conversationally, provide insights, identify trends, and give actionable recommendations. Be specific with numbers. Keep responses concise but insightful. If the user asks for a report, tell them you've prepared the data and they can click the "Generate Report" button in the Reports tab.\n\n${buildAnalyticsContext()}` },
             ...messages.filter(m => m.role !== "assistant" || messages.indexOf(m) !== 0).map(m => ({ role: m.role, content: m.content })),
