@@ -162,15 +162,24 @@ app.get("/api/youtube/top-videos", async (req, res) => {
 
     // Get video titles from Data API
     if (data.rows && data.rows.length > 0) {
-      const videoIds = data.rows.map(r => r[0]).join(",");
-      const videosRes = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoIds}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      const videosData = await videosRes.json();
-      const titleMap = {};
-      videosData.items?.forEach(v => { titleMap[v.id] = v.snippet.title; });
-      data.titleMap = titleMap;
+      try {
+        const videoIds = data.rows.map(r => r[0]).join(",");
+        console.log("Fetching titles for video IDs:", videoIds);
+        const videosRes = await fetch(
+          `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${videoIds}`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        const videosData = await videosRes.json();
+        console.log("Videos API response:", JSON.stringify(videosData).slice(0, 500));
+        const titleMap = {};
+        if (videosData.items) {
+          videosData.items.forEach(v => { titleMap[v.id] = v.snippet.title; });
+        }
+        data.titleMap = titleMap;
+      } catch (titleErr) {
+        console.error("Failed to fetch video titles:", titleErr);
+        data.titleMap = {};
+      }
     }
 
     res.json(data);
