@@ -297,7 +297,9 @@ app.post("/api/chat", async (req, res) => {
         body: JSON.stringify({
           system_instruction: systemMsg ? { parts: [{ text: systemMsg }] } : undefined,
           contents,
-          generationConfig: {},
+          generationConfig: {
+            maxOutputTokens: 65536,
+          },
         }),
       }
     );
@@ -306,7 +308,9 @@ app.post("/api/chat", async (req, res) => {
     if (!response.ok) return res.status(response.status).json(data);
 
     // Convert Gemini response back to OpenAI-compatible format for frontend
-    const text = data.candidates?.[0]?.content?.parts?.[0]?.text || "Sorry, I couldn't process that.";
+    // Combine all parts in case response is split across multiple parts
+    const parts = data.candidates?.[0]?.content?.parts || [];
+    const text = parts.map(p => p.text || "").join("") || "Sorry, I couldn't process that.";
     res.json({
       choices: [{ message: { content: text } }],
     });
