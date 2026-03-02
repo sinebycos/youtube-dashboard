@@ -311,7 +311,7 @@ const ReportView = ({ data, channelInfo, trafficSources, demographics, topVideos
 };
 
 // ─── SETTINGS PAGE ──────────────────────────────────────────────────────────
-const SettingsPage = ({ connected, onConnect, onDisconnect }) => (
+const SettingsPage = ({ connected, onConnect, onDisconnect, channelName }) => (
   <div style={{ maxWidth: 640, margin: "0 auto" }}>
     <h2 style={{ color: theme.text, fontSize: 24, fontWeight: 700, marginBottom: 8 }}>Settings</h2>
     <p style={{ color: theme.textMuted, fontSize: 14, marginBottom: 32 }}>Configure your YouTube Analytics connection and preferences.</p>
@@ -334,8 +334,8 @@ const SettingsPage = ({ connected, onConnect, onDisconnect }) => (
             <span style={{ color: "#22C55E", fontSize: 14, fontWeight: 500 }}>Connected to YouTube Analytics</span>
           </div>
           <p style={{ color: theme.textMuted, fontSize: 13, marginBottom: 16 }}>
-            Channel: <strong style={{ color: theme.text }}>{CHANNEL_INFO.name}</strong><br/>
-            Using demo data for preview. Connect real API for live data.
+            Channel: <strong style={{ color: theme.text }}>{channelName}</strong><br/>
+            Your YouTube account is connected and syncing real data.
           </p>
           <button onClick={onDisconnect} style={{
             background: "rgba(239,68,68,0.1)", color: "#EF4444", border: "1px solid rgba(239,68,68,0.2)",
@@ -370,7 +370,7 @@ const SettingsPage = ({ connected, onConnect, onDisconnect }) => (
             padding: "12px 24px", cursor: "pointer", fontSize: 14, fontWeight: 600,
             display: "flex", alignItems: "center", gap: 8
           }}>
-            {Icons.youtube} Connect with Demo Data
+            {Icons.youtube} Connect YouTube Account
           </button>
         </div>
       )}
@@ -401,8 +401,12 @@ const SettingsPage = ({ connected, onConnect, onDisconnect }) => (
 // ─── MAIN APP ───────────────────────────────────────────────────────────────
 export default function App() {
   const [page, setPage] = useState("dashboard");
-  const [connected, setConnected] = useState(true);
-  const [data] = useState(generateDemoData);
+  const [connected, setConnected] = useState(false);
+  const [data, setData] = useState(generateDemoData);
+  const [channelInfo, setChannelInfo] = useState(CHANNEL_INFO);
+  const [trafficSources, setTrafficSources] = useState(TRAFFIC_SOURCES);
+  const [demographics, setDemographics] = useState(DEMOGRAPHICS);
+  const [topVideos, setTopVideos] = useState(TOP_VIDEOS);
   const [messages, setMessages] = useState([
     { role: "assistant", content: "👋 Hi! I'm your YouTube Analytics AI Assistant. I have access to your channel data and can help you understand your performance, identify trends, and generate reports.\n\nTry asking me things like:\n• \"How are my views trending this month?\"\n• \"Which video performed best?\"\n• \"What demographics should I target?\"\n• \"Generate a weekly report\"" }
   ]);
@@ -411,6 +415,112 @@ export default function App() {
   const [showReport, setShowReport] = useState(false);
   const chatEndRef = useRef(null);
   const inputRef = useRef(null);
+
+  // Check auth status on load & URL param
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("connected") === "true") {
+      window.history.replaceState({}, "", "/");
+    }
+    fetch("/api/auth/status").then(r => r.json()).then(d => {
+      setConnected(d.connected);
+      if (d.connected) fetchAllYouTubeData();
+    }).catch(() => {});
+  }, []);
+
+  const fetchAllYouTubeData = async () => {
+    try {
+      // Fetch channel info
+      const chRes = await fetch("/api/youtube/channel");
+      const chData = await chRes.json();
+      if (chData.items?.[0]) {
+        const ch = chData.items[0];
+        setChannelInfo({
+          name: ch.snippet.title,
+          subscribers: parseInt(ch.statistics.subscriberCount) || 0,
+          totalViews: parseInt(ch.statistics.viewCount) || 0,
+          totalVideos: parseInt(ch.statistics.videoCount) || 0,
+          joinDate: ch.snippet.publishedAt?.split("T")[0] || "",
+        });
+      }
+
+      // Fetch daily analytics
+      const anRes = await fetch("/api/youtube/analytics");
+      const anData = await anRes.json();
+      if (anData.rows?.length > 0) {
+        const daily = anData.rows.map(row => {
+          const d = new Date(row[0]);
+          return {
+            date: row[0],
+            label: `${d.getMonth() + 1}/${d.getDate()}`,
+            views: row[1] || 0,
+            watchTimeHours: +((row[2] || 0) / 60).toFixed(1),
+            subscribers: row[3] || 0,
+            revenue: +(row[4] || 0).toFixed(2),
+            likes: row[5] || 0,
+            comments: row[6] || 0,
+            shares: row[7] || 0,
+          };
+        });
+        setData(daily);
+      }
+
+      // Fetch top videos
+      const tvRes = await fetch("/api/youtube/top-videos");
+      const tvData = await tvRes.json();
+      if (tvData.rows?.length > 0) {
+        setTopVideos(tvData.rows.map(row => ({
+          title: tvData.titleMap?.[row[0]] || row[0],
+          views: row[1] || 0,
+          watchTime: row[2] || 0,
+          ctr: +(row[3] || 0).toFixed(1),
+        })));
+      }
+
+      // Fetch traffic sources
+      const tsRes = await fetch("/api/youtube/traffic-sources");
+      const tsData = await tsRes.json();
+      if (tsData.rows?.length > 0) {
+        const colors = ["#FF4444", "#FF7744", "#FFAA33", "#44BBFF", "#88DDAA", "#A855F7", "#F59E0B"];
+        const total = tsData.rows.reduce((s, r) => s + r[1], 0);
+        setTrafficSources(tsData.rows.map((row, i) => ({
+          name: row[0].replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+          value: total > 0 ? +((row[1] / total) * 100).toFixed(1) : 0,
+          color: colors[i % colors.length],
+        })));
+      }
+
+      // Fetch demographics
+      const dmRes = await fetch("/api/youtube/demographics");
+      const dmData = await dmRes.json();
+      if (dmData.rows?.length > 0) {
+        const demoMap = {};
+        dmData.rows.forEach(row => {
+          const age = row[0].replace("age", "");
+          if (!demoMap[age]) demoMap[age] = { age, male: 0, female: 0 };
+          if (row[1] === "male") demoMap[age].male = +(row[2] || 0).toFixed(1);
+          else demoMap[age].female = +(row[2] || 0).toFixed(1);
+        });
+        setDemographics(Object.values(demoMap));
+      }
+    } catch (err) {
+      console.error("Failed to fetch YouTube data:", err);
+    }
+  };
+
+  const handleConnect = () => {
+    window.location.href = "/auth/google";
+  };
+
+  const handleDisconnect = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    setConnected(false);
+    setData(generateDemoData());
+    setChannelInfo(CHANNEL_INFO);
+    setTrafficSources(TRAFFIC_SOURCES);
+    setDemographics(DEMOGRAPHICS);
+    setTopVideos(TOP_VIDEOS);
+  };
 
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -430,10 +540,10 @@ export default function App() {
 
     return `
 YOUTUBE CHANNEL ANALYTICS DATA:
-Channel: ${CHANNEL_INFO.name}
-Total Subscribers: ${CHANNEL_INFO.subscribers.toLocaleString()}
-Total Videos: ${CHANNEL_INFO.totalVideos}
-Period: Last 30 days (${data[0].date} to ${data[data.length - 1].date})
+Channel: ${channelInfo.name}
+Total Subscribers: ${channelInfo.subscribers.toLocaleString()}
+Total Videos: ${channelInfo.totalVideos}
+Period: Last 30 days (${data[0]?.date || "N/A"} to ${data[data.length - 1]?.date || "N/A"})
 
 SUMMARY METRICS (30 days):
 - Total Views: ${totalViews.toLocaleString()}
@@ -444,18 +554,18 @@ SUMMARY METRICS (30 days):
 - Views trend (7d vs prev 7d): ${viewsChange}%
 
 TOP VIDEOS:
-${TOP_VIDEOS.map((v, i) => `${i + 1}. "${v.title}" - ${v.views.toLocaleString()} views, ${v.watchTime} min watch time, ${v.ctr}% CTR`).join("\n")}
+${topVideos.map((v, i) => `${i + 1}. "${v.title}" - ${v.views.toLocaleString()} views, ${v.watchTime} min watch time, ${v.ctr}% CTR`).join("\n")}
 
 TRAFFIC SOURCES:
-${TRAFFIC_SOURCES.map(s => `- ${s.name}: ${s.value}%`).join("\n")}
+${trafficSources.map(s => `- ${s.name}: ${s.value}%`).join("\n")}
 
 DEMOGRAPHICS:
-${DEMOGRAPHICS.map(d => `- Age ${d.age}: Male ${d.male}%, Female ${d.female}%`).join("\n")}
+${demographics.map(d => `- Age ${d.age}: Male ${d.male}%, Female ${d.female}%`).join("\n")}
 
 DAILY DATA (last 7 days):
 ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, +${d.subscribers} subs, $${d.revenue} revenue`).join("\n")}
     `.trim();
-  }, [data]);
+  }, [data, channelInfo, topVideos, trafficSources, demographics]);
 
   const sendMessage = async () => {
     if (!input.trim() || loading) return;
@@ -566,7 +676,7 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
             }}>{connected ? "Connected" : "Disconnected"}</span>
           </div>
           <div style={{ fontSize: 11, color: theme.textDim }}>
-            {connected ? CHANNEL_INFO.name : "No channel linked"}
+            {connected ? channelInfo.name : "No channel linked"}
           </div>
         </div>
       </div>
@@ -631,8 +741,8 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
                 <h3 style={{ color: theme.text, fontSize: 15, fontWeight: 600, marginBottom: 20 }}>Traffic Sources</h3>
                 <ResponsiveContainer width="100%" height={200}>
                   <PieChart>
-                    <Pie data={TRAFFIC_SOURCES} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
-                      {TRAFFIC_SOURCES.map((entry, i) => (
+                    <Pie data={trafficSources} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" paddingAngle={3}>
+                      {trafficSources.map((entry, i) => (
                         <Cell key={i} fill={entry.color} />
                       ))}
                     </Pie>
@@ -640,7 +750,7 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
                   </PieChart>
                 </ResponsiveContainer>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginTop: 8 }}>
-                  {TRAFFIC_SOURCES.map((s, i) => (
+                  {trafficSources.map((s, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: 4, fontSize: 11, color: theme.textMuted }}>
                       <div style={{ width: 8, height: 8, borderRadius: 2, background: s.color }} />
                       {s.name}
@@ -656,10 +766,10 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
                 borderRadius: 16, padding: 24
               }}>
                 <h3 style={{ color: theme.text, fontSize: 15, fontWeight: 600, marginBottom: 16 }}>Top Videos</h3>
-                {TOP_VIDEOS.map((v, i) => (
+                {topVideos.map((v, i) => (
                   <div key={i} style={{
                     display: "flex", justifyContent: "space-between", alignItems: "center",
-                    padding: "12px 0", borderBottom: i < TOP_VIDEOS.length - 1 ? `1px solid ${theme.border}` : "none"
+                    padding: "12px 0", borderBottom: i < topVideos.length - 1 ? `1px solid ${theme.border}` : "none"
                   }}>
                     <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                       <span style={{ color: theme.textDim, fontSize: 12, fontWeight: 600, minWidth: 20 }}>#{i + 1}</span>
@@ -678,7 +788,7 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
               }}>
                 <h3 style={{ color: theme.text, fontSize: 15, fontWeight: 600, marginBottom: 20 }}>Demographics</h3>
                 <ResponsiveContainer width="100%" height={220}>
-                  <BarChart data={DEMOGRAPHICS} layout="vertical">
+                  <BarChart data={demographics} layout="vertical">
                     <CartesianGrid stroke={theme.border} strokeDasharray="3 3" horizontal={false} />
                     <XAxis type="number" tick={{ fill: theme.textDim, fontSize: 11 }} axisLine={false} tickLine={false} />
                     <YAxis dataKey="age" type="category" tick={{ fill: theme.textDim, fontSize: 11 }} axisLine={false} tickLine={false} width={45} />
@@ -872,8 +982,9 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
           <div style={{ animation: "fadeSlideUp 0.3s ease" }}>
             <SettingsPage
               connected={connected}
-              onConnect={() => setConnected(true)}
-              onDisconnect={() => setConnected(false)}
+              onConnect={handleConnect}
+              onDisconnect={handleDisconnect}
+              channelName={channelInfo.name}
             />
           </div>
         )}
@@ -882,10 +993,10 @@ ${last7.map(d => `${d.date}: ${d.views} views, ${d.watchTimeHours}h watch time, 
       {showReport && (
         <ReportView
           data={data}
-          channelInfo={CHANNEL_INFO}
-          trafficSources={TRAFFIC_SOURCES}
-          demographics={DEMOGRAPHICS}
-          topVideos={TOP_VIDEOS}
+          channelInfo={channelInfo}
+          trafficSources={trafficSources}
+          demographics={demographics}
+          topVideos={topVideos}
           onClose={() => setShowReport(false)}
         />
       )}
