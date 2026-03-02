@@ -9,7 +9,9 @@ RUN npm run build
 # Production stage
 FROM node:20-alpine
 WORKDIR /app
-RUN npm install -g serve
+COPY package.json package-lock.json* ./
+RUN npm install --omit=dev
 COPY --from=build /app/dist ./dist
+COPY server.js .
 EXPOSE 3000
-CMD ["serve", "dist", "-s", "-l", "3000"]
+CMD ["node", "server.js"]
